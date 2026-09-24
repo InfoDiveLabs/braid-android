@@ -149,16 +149,18 @@ phone's address from the bottom of the app.</sub>
 
 ## How it works
 
-```
-   Braid on your computer                 This app on your phone                  Internet
-   splits a file into ranges ── Wi-Fi ──▶  checks the pairing key,   ── 5G ──▶   the server
-   checks every chunk        ◀─ or USB ──  sends each request out    ◀───────
-                                           the network it names
-```
+<p align="center">
+  <img src="docs/ways-to-connect.jpg" alt="Your computer alone, with your phone over Wi-Fi, and with your phone over USB" width="100%">
+</p>
 
 The phone runs a small HTTP proxy. Every request from Braid names the network to use and
 carries the key from pairing. The phone either sends it out exactly that network or
 answers that it can't, so Braid can move the work elsewhere. It never guesses.
+
+The phone relays each request as it arrives: bytes come in over mobile data and go
+straight on to the computer, and nothing is stored on the phone. A USB cable (USB
+tethering) is the fastest way to connect, because the phone's hop to the computer then
+doesn't share airtime with the computer's own Wi-Fi.
 
 Sharing runs as a foreground service with an honest notification, keeps going with the
 screen off, and keeps the processor awake only while data is actually flowing.
