@@ -12,14 +12,21 @@ import com.infodive.braid.relay.LaneTable
 import com.infodive.braid.relay.Upstream
 import java.net.Socket
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 /**
- * Keeps each lane in [table] bound to the Android Network it is named for.
+ * Keeps each lane in [table] bound to the Android Network it is named for,
+ * while sharing is running.
  *
- * Mobile data is requested only while its lane is switched on, because
- * holding the request keeps the radio up while Wi-Fi is the default. Wi-Fi is
- * only listened for: asking for it could make the phone join a network.
+ * Mobile data is requested only while sharing runs and its lane is switched
+ * on, because holding the request keeps the radio up while Wi-Fi is the
+ * default. Wi-Fi is only listened for: asking for it could make the phone
+ * join a network.
+ *
+ * A lane is offered when the person switched it on and it has not used up
+ * its limit. The two are kept apart so that reaching a limit never flips the
+ * person's own switch.
  */
 class NetworkLanes(context: Context, private val table: LaneTable) {
     private val cm = context.getSystemService(ConnectivityManager::class.java)
@@ -27,34 +34,84 @@ class NetworkLanes(context: Context, private val table: LaneTable) {
     private val prefs = context.getSharedPreferences("lanes", Context.MODE_PRIVATE)
     private val worker = Executors.newSingleThreadScheduledExecutor { Thread(it, "egress").apply { isDaemon = true } }
     private val bound = HashMap<String, Network>()
-    private var cellCallback: ConnectivityManager.NetworkCallback? = null
+    private val exhausted = HashSet<String>()
+    private val callbacks = HashMap<String, ConnectivityManager.NetworkCallback>()
+    private var refresh: ScheduledFuture<*>? = null
+    private var running = false
 
     @Volatile
     var onChange: (() -> Unit)? = null
 
-    fun start() {
+    init {
         val carrier = telephony?.simOperatorName?.takeIf { it.isNotBlank() }
         table.define(CELL, "cellular", if (carrier != null) "Mobile data ($carrier)" else "Mobile data")
         table.define(WIFI, "wifi", "Wi-Fi")
-        cm.registerNetworkCallback(request(NetworkCapabilities.TRANSPORT_WIFI), callbackFor(WIFI))
-        for (id in listOf(CELL, WIFI)) setEnabled(id, prefs.getBoolean(id, false))
-        worker.scheduleWithFixedDelay(::refreshAll, REFRESH_MINUTES, REFRESH_MINUTES, TimeUnit.MINUTES)
     }
 
-    fun isEnabled(id: String) = table.isEnabled(id)
+    val ids get() = listOf(CELL, WIFI)
+
+    fun label(id: String) = if (id == CELL) "Mobile data" else "Wi-Fi"
 
     @Synchronized
-    fun setEnabled(id: String, enabled: Boolean) {
-        prefs.edit().putBoolean(id, enabled).apply()
-        table.setEnabled(id, enabled)
-        if (id == CELL) {
-            if (enabled && cellCallback == null) {
-                cellCallback = callbackFor(CELL).also { cm.requestNetwork(request(NetworkCapabilities.TRANSPORT_CELLULAR), it) }
-            } else if (!enabled) {
-                cellCallback?.let(cm::unregisterNetworkCallback)
-                cellCallback = null
-                detach(CELL, null)
+    fun start() {
+        if (running) return
+        running = true
+        exhausted.clear()
+        ids.forEach(::apply)
+        refresh = worker.scheduleWithFixedDelay(::refreshAll, REFRESH_MINUTES, REFRESH_MINUTES, TimeUnit.MINUTES)
+    }
+
+    @Synchronized
+    fun stop() {
+        if (!running) return
+        running = false
+        refresh?.cancel(false)
+        ids.forEach(::apply)
+    }
+
+    fun isWanted(id: String) = prefs.getBoolean(id, false)
+
+    @Synchronized
+    fun setWanted(id: String, wanted: Boolean) {
+        prefs.edit().putBoolean(id, wanted).apply()
+        apply(id)
+    }
+
+    @Synchronized
+    fun isExhausted(id: String) = id in exhausted
+
+    @Synchronized
+    fun setExhausted(id: String, value: Boolean) {
+        if (value == id in exhausted) return
+        if (value) exhausted.add(id) else exhausted.remove(id)
+        apply(id)
+    }
+
+    /** Megabytes, or 0 for no limit. */
+    fun limitMb(id: String): Long = prefs.getLong("limit_$id", 0)
+
+    fun setLimitMb(id: String, mb: Long) {
+        prefs.edit().putLong("limit_$id", mb).apply()
+        onChange?.invoke()
+    }
+
+    fun isOffered(id: String) = table.offered().any { it.id == id }
+
+    private fun apply(id: String) {
+        val on = running && isWanted(id) && id !in exhausted
+        table.setEnabled(id, on)
+        val listening = callbacks[id] != null
+        if (on && !listening) {
+            val callback = callbackFor(id)
+            callbacks[id] = callback
+            if (id == CELL) {
+                cm.requestNetwork(request(NetworkCapabilities.TRANSPORT_CELLULAR), callback)
+            } else {
+                cm.registerNetworkCallback(request(NetworkCapabilities.TRANSPORT_WIFI), callback)
             }
+        } else if (!on && listening) {
+            cm.unregisterNetworkCallback(callbacks.remove(id)!!)
+            detach(id, null)
         }
         onChange?.invoke()
     }
@@ -70,9 +127,14 @@ class NetworkLanes(context: Context, private val table: LaneTable) {
         override fun onLost(network: Network) = detach(id, network)
     }
 
-    /** The same network changing its addresses keeps its current answer until a fresh one arrives. */
+    /**
+     * The same network changing its addresses keeps its current answer until a
+     * fresh one arrives. A callback that fires after its lane was switched off
+     * is ignored, so it cannot bind a lane nobody is listening for.
+     */
     @Synchronized
     private fun attach(id: String, network: Network) {
+        if (callbacks[id] == null) return
         if (bound[id] == network) {
             worker.execute { resolve(id, table.generation(id), network) }
             return

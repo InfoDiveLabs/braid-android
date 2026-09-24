@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * An HTTP forward proxy on one port.
@@ -34,6 +35,14 @@ class RelayServer(
         Thread(r, "relay").apply { isDaemon = true }
     }
     private val open = ConcurrentHashMap.newKeySet<Socket>()
+    private val spliced = ConcurrentHashMap<Socket, Credentials>()
+    private val active = AtomicInteger()
+
+    val traffic = Traffic()
+
+    /** Called with the number of proxied connections whenever it changes, so the host can hold a wake lock only while it is non-zero. */
+    @Volatile
+    var onActiveChanged: ((Int) -> Unit)? = null
 
     @Volatile
     private var server: ServerSocket? = null
@@ -46,6 +55,14 @@ class RelayServer(
         socket.bind(bindAddress, 128)
         server = socket
         pool.execute { acceptLoop(socket) }
+    }
+
+    /** Closes every connection carrying [lane], for a lane switched off or out of allowance mid-transfer. */
+    fun drop(lane: String) = dropWhere { it.lane == lane }
+
+    /** Closes every connection whose credentials match, for a desktop forgotten while it was downloading. */
+    fun dropWhere(match: (Credentials) -> Boolean) {
+        spliced.filterValues(match).keys.forEach { it.closeQuietly() }
     }
 
     override fun close() {
@@ -92,29 +109,33 @@ class RelayServer(
             }
             Target.Unsupported -> reply(out, 501, "Not Implemented")
             is Target.Tunnel -> {
-                val upstream = routeOrReply(head, out) ?: return
+                val (credentials, upstream) = routeOrReply(head, out) ?: return
                 val up = connectOrNull(upstream, target.host, target.port) ?: return reply(out, 502, "Bad Gateway")
                 out.write("HTTP/1.1 200 Connection Established\r\n\r\n".toByteArray(Charsets.ISO_8859_1))
                 out.flush()
-                splice(client, input, up)
+                splice(credentials, client, input, up)
             }
             is Target.Forward -> {
-                val upstream = routeOrReply(head, out) ?: return
+                val (credentials, upstream) = routeOrReply(head, out) ?: return
                 val up = connectOrNull(upstream, target.host, target.port) ?: return reply(out, 502, "Bad Gateway")
-                up.getOutputStream().write(originForm(head, target))
-                splice(client, input, up)
+                val request = originForm(head, target)
+                up.getOutputStream().write(request)
+                traffic.add(credentials.lane, request.size)
+                splice(credentials, client, input, up)
             }
         }
     }
 
-    private fun routeOrReply(head: RequestHead, out: OutputStream): Upstream? =
-        when (val route = router.route(Credentials.parse(head.header("proxy-authorization")))) {
-            is Route.Via -> route.upstream
+    private fun routeOrReply(head: RequestHead, out: OutputStream): Pair<Credentials, Upstream>? {
+        val credentials = Credentials.parse(head.header("proxy-authorization"))
+        return when (val route = router.route(credentials)) {
+            is Route.Via -> (credentials ?: Credentials("", "")) to route.upstream
             Route.Refused -> null.also {
                 reply(out, 407, "Proxy Authentication Required", extra = "Proxy-Authenticate: Basic realm=\"braid\"\r\n")
             }
             Route.Unavailable -> null.also { reply(out, 503, "Service Unavailable") }
         }
+    }
 
     private fun connectOrNull(upstream: Upstream, host: String, port: Int): Socket? = try {
         upstream.connect(host, port).also {
@@ -129,12 +150,16 @@ class RelayServer(
      * Copies both directions until both have ended. Half-closes are passed on,
      * so a tunnel behaves like the TCP connection it stands in for.
      */
-    private fun splice(client: Socket, clientIn: InputStream, up: Socket) {
+    private fun splice(credentials: Credentials, client: Socket, clientIn: InputStream, up: Socket) {
+        val lane = credentials.lane
         client.soTimeout = 0
+        spliced[client] = credentials
+        spliced[up] = credentials
+        onActiveChanged?.invoke(active.incrementAndGet())
         try {
             val toUpstream = pool.submit {
                 try {
-                    copy(clientIn, up.getOutputStream())
+                    copy(clientIn, up.getOutputStream()) { traffic.add(lane, it) }
                     up.shutdownOutput()
                 } catch (e: IOException) {
                     up.closeQuietly()
@@ -142,7 +167,7 @@ class RelayServer(
                 }
             }
             try {
-                copy(up.getInputStream(), client.getOutputStream())
+                copy(up.getInputStream(), client.getOutputStream()) { traffic.add(lane, it) }
                 client.shutdownOutput()
             } catch (e: IOException) {
                 up.closeQuietly()
@@ -153,6 +178,9 @@ class RelayServer(
         } finally {
             up.closeQuietly()
             open.remove(up)
+            spliced.remove(up)
+            spliced.remove(client)
+            onActiveChanged?.invoke(active.decrementAndGet())
         }
     }
 
@@ -218,13 +246,14 @@ class RelayServer(
             out.flush()
         }
 
-        private fun copy(from: InputStream, to: OutputStream) {
+        private fun copy(from: InputStream, to: OutputStream, counted: (Int) -> Unit) {
             val buf = ByteArray(BUFFER_SIZE)
             while (true) {
                 val n = from.read(buf)
                 if (n < 0) return
                 to.write(buf, 0, n)
                 to.flush()
+                counted(n)
             }
         }
 

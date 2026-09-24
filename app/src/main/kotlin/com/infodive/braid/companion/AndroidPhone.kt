@@ -13,8 +13,12 @@ import java.security.SecureRandom
 
 class AndroidPhone(private val context: Context) : Phone, Router {
     val pairings = Pairings(PreferenceStorage(context, "pairings"))
-    private val table = LaneTable()
+    val table = LaneTable()
     val lanes = NetworkLanes(context, table)
+
+    /** Reaches the person when no screen is open to show the pairing dialog. */
+    @Volatile
+    var onPairingRequested: ((PairingPrompt.Request) -> Unit)? = null
 
     override val name: String
         get() = Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME)
@@ -32,8 +36,10 @@ class AndroidPhone(private val context: Context) : Phone, Router {
 
     override fun isPaired(key: String) = pairings.isPaired(key)
 
-    override fun pair(desktop: String, from: String): String? =
-        if (PairingPrompt.ask(desktop, from, PAIR_TIMEOUT_MS)) pairings.add(desktop) else null
+    override fun pair(desktop: String, from: String): String? {
+        val allowed = PairingPrompt.ask(desktop, from, PAIR_TIMEOUT_MS) { onPairingRequested?.invoke(it) }
+        return if (allowed) pairings.add(desktop) else null
+    }
 
     override fun route(credentials: Credentials?): Route = table.route(credentials, pairings::isPaired)
 
