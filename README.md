@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="#install"><b>Install</b></a> &middot;
+  <a href="#works-with-braid-for-your-computer">Braid for your computer</a> &middot;
   <a href="#highlights">Highlights</a> &middot;
   <a href="#screens">Screens</a> &middot;
   <a href="#how-it-works">How it works</a> &middot;
@@ -24,6 +25,25 @@
   <img alt="0.5 MB" src="https://img.shields.io/badge/0.5%20MB-D07A40?style=flat-square">
   <img alt="Licence" src="https://img.shields.io/badge/PolyForm%20Noncommercial-3FA292?style=flat-square">
 </p>
+
+---
+
+## Works with Braid for your computer
+
+<table>
+<tr>
+<td width="46%"><a href="https://github.com/InfoDiveLabs/braid"><img src="docs/desktop.jpg" alt="Braid for macOS, Windows and Linux"></a></td>
+<td valign="top">
+<b><a href="https://github.com/InfoDiveLabs/braid">Braid</a></b> is the download manager this app works with, for macOS,
+Windows and Linux. It splits each download across every network your computer has, checks every
+chunk, and resumes after a crash without losing the file.<br><br>
+This app adds your phone to that list. Braid does the downloading; the phone is one more road
+to the internet, and shows up in Braid's sidebar with its own speed beside your computer's
+Wi-Fi and Ethernet.<br><br>
+<a href="https://github.com/InfoDiveLabs/braid"><b>Get Braid for your computer</b></a>
+</td>
+</tr>
+</table>
 
 ---
 
@@ -109,8 +129,8 @@ phone. The first time, Android asks you to allow installs from your browser or f
 <tr><td>The Android emulator</td><td><code>x86_64</code> / <code>x86</code></td></tr>
 </table>
 
-Requires Android 8.0 or newer. You also need
-[Braid for your computer](https://github.com/InfoDiveLabs/braid).
+Requires Android 8.0 or newer, and [Braid on your computer](https://github.com/InfoDiveLabs/braid)
+(macOS, Windows or Linux) from the desktop repository's Releases.
 
 ### Get going in a minute
 
