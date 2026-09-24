@@ -151,13 +151,10 @@ library is ever added.
 
 ## What is not verified
 
-- **A real download through Braid.** Everything here has been driven by `curl` and a
-  stand-in desktop. The end-to-end test, a large verified download split between the
-  laptop's Wi-Fi and the phone with the phone walked out of range mid-transfer, has not
-  been run yet.
-- **Pairing by the desktop's real QR.** A code the desktop produced parses, and
-  registration works against a stand-in listener, and the in-app scanner opens on the
-  R8-shrunk release build, but the phone has not yet scanned a code shown by Braid itself.
+- **Automated end-to-end coverage.** A real download through Braid, with pairing by
+  the desktop's own QR code, was run by hand on 2026-09-24 and reported working. The
+  phone side of that run was observed; nothing repeats it automatically. The JVM suite
+  and the `adb` checks above are what guard regressions.
 - **One phone, one carrier.** A Pixel 7 Pro on Android 17, on Jio, which is IPv6-only
   with NAT64. Other manufacturers' builds, IPv4 carriers, dual-SIM phones and Android
   versions before 17 have not been tried.

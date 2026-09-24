@@ -38,10 +38,13 @@ jobs:
           BRAID_KEY_PASSWORD: ${{ secrets.BRAID_KEY_PASSWORD }}
         run: ./gradlew :app:dist
 
+      - name: Checksum
+        run: cd dist && sha256sum *.apk > SHA256SUMS
+
       - name: Publish
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.apk
-          body: |
-            One APK for every Android phone (arm64-v8a, armeabi-v7a, x86_64, x86): the app has no native code.
-            Requires Android 8.0 or later. See the README for which device uses which architecture.
+          files: |
+            dist/*.apk
+            dist/SHA256SUMS
+          body_path: docs/releases/${{ github.ref_name }}.md
