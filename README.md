@@ -15,7 +15,9 @@
   <a href="#highlights">Highlights</a> &middot;
   <a href="#screens">Screens</a> &middot;
   <a href="#how-it-works">How it works</a> &middot;
-  <a href="DEVELOPMENT.md">Development</a>
+  <a href="DEVELOPMENT.md">Development</a> &middot;
+  <a href="https://www.infodivelabs.com/products/braid/android">Website</a> &middot;
+  <a href="https://www.infodivelabs.com/products/braid/docs#add-a-phone">Setup guide</a>
 </p>
 
 <p align="center">
