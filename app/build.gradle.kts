@@ -8,7 +8,7 @@ val signing = Properties().apply {
     rootProject.file(".env").takeIf { it.exists() }?.reader()?.use { load(it) }
     System.getenv().filterKeys { it.startsWith("BRAID_") }.forEach { (k, v) -> setProperty(k, v) }
 }
-val appVersion = "0.1.0"
+val appVersion = "0.1.1"
 
 extensions.configure<com.android.build.api.dsl.ApplicationExtension> {
     namespace = "com.infodive.braid.companion"
@@ -18,7 +18,7 @@ extensions.configure<com.android.build.api.dsl.ApplicationExtension> {
         applicationId = "com.infodive.braid.companion"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
+        versionCode = 2
         versionName = appVersion
     }
 
