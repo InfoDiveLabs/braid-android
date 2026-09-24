@@ -1,24 +1,25 @@
 package com.infodive.braid.companion
 
 import android.app.Activity
+import android.content.Context
 import android.os.Bundle
 import android.view.WindowManager
 import android.widget.TextView
+import com.infodive.braid.relay.ControlPlane
 import com.infodive.braid.relay.RelayServer
 import com.infodive.braid.relay.Upstream
 import java.net.NetworkInterface
 
 /**
- * Task 2 shell: runs the proxy on port 8710 over the default network while
- * this screen is open. No pairing yet, so nothing here is safe to leave
- * running on a shared network.
+ * Runs the relay while this screen is open. Nothing is paired and nothing is
+ * refused yet, so this is not safe to leave running on a shared network.
  */
 class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val status = try {
-            Relay.ensureStarted()
+            Relay.ensureStarted(applicationContext)
             "Relay listening on port ${RelayServer.DEFAULT_PORT}\n\n" + addresses().joinToString("\n")
         } catch (e: Exception) {
             "Relay failed to start: $e"
@@ -41,7 +42,9 @@ private object Relay {
     private var server: RelayServer? = null
 
     @Synchronized
-    fun ensureStarted() {
-        if (server == null) server = RelayServer(Upstream.DIRECT).also { it.start() }
+    fun ensureStarted(context: Context) {
+        if (server == null) {
+            server = RelayServer(Upstream.DIRECT, control = ControlPlane(AndroidPhone(context))).also { it.start() }
+        }
     }
 }

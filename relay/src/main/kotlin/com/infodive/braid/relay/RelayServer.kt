@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit
 class RelayServer(
     private val upstream: Upstream,
     private val bindAddress: InetSocketAddress = InetSocketAddress(DEFAULT_PORT),
+    private val control: ControlPlane? = null,
 ) : Closeable {
     private val pool: ExecutorService = Executors.newCachedThreadPool { r ->
         Thread(r, "relay").apply { isDaemon = true }
@@ -65,7 +66,6 @@ class RelayServer(
                 try {
                     handle(client)
                 } catch (e: IOException) {
-                    // A dropped client or upstream ends only its own connection.
                 } finally {
                     client.closeQuietly()
                     open.remove(client)
@@ -83,7 +83,12 @@ class RelayServer(
         val head = RequestHead.parse(text) ?: return reply(out, 400, "Bad Request")
 
         when (val target = head.target) {
-            is Target.Local -> reply(out, 404, "Not Found")
+            is Target.Local -> {
+                val plane = control ?: return reply(out, 404, "Not Found")
+                val body = readBody(head, input) ?: return reply(out, 400, "Bad Request")
+                val answer = plane.respond(head, target.path, body)
+                reply(out, answer.code, answer.reason, answer.json)
+            }
             Target.Unsupported -> reply(out, 501, "Not Implemented")
             is Target.Tunnel -> {
                 val up = connectOrNull(target.host, target.port) ?: return reply(out, 502, "Bad Gateway")
@@ -133,7 +138,6 @@ class RelayServer(
             }
             toUpstream.get(DRAIN_TIMEOUT_S, TimeUnit.SECONDS)
         } catch (e: Exception) {
-            // Timed out waiting for the client to finish; closing below ends it.
         } finally {
             up.closeQuietly()
             open.remove(up)
@@ -144,6 +148,7 @@ class RelayServer(
         const val DEFAULT_PORT = 8710
         private const val BUFFER_SIZE = 64 * 1024
         private const val MAX_HEAD = 64 * 1024
+        private const val MAX_CONTROL_BODY = 16 * 1024
         private const val HEAD_TIMEOUT_MS = 30_000
         private const val DRAIN_TIMEOUT_S = 30L
 
@@ -187,8 +192,17 @@ class RelayServer(
             return buf.toString(Charsets.ISO_8859_1)
         }
 
-        private fun reply(out: OutputStream, code: Int, reason: String) {
-            out.write("HTTP/1.1 $code $reason\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray(Charsets.ISO_8859_1))
+        private fun readBody(head: RequestHead, input: InputStream): ByteArray? {
+            val length = head.header("content-length")?.let { it.toIntOrNull() ?: return null } ?: 0
+            if (length !in 0..MAX_CONTROL_BODY) return null
+            return input.readNBytes(length).takeIf { it.size == length }
+        }
+
+        private fun reply(out: OutputStream, code: Int, reason: String, json: String? = null) {
+            val body = json?.toByteArray(Charsets.UTF_8) ?: ByteArray(0)
+            val type = if (json != null) "Content-Type: application/json; charset=utf-8\r\n" else ""
+            out.write("HTTP/1.1 $code $reason\r\n${type}Content-Length: ${body.size}\r\nConnection: close\r\n\r\n".toByteArray(Charsets.ISO_8859_1))
+            out.write(body)
             out.flush()
         }
 
