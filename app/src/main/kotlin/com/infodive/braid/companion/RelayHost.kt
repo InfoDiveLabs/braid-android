@@ -126,7 +126,7 @@ object RelayHost {
         peak = maxOf(peak, total)
         for (lane in device.lanes.ids) {
             val used = relay.traffic.bytes(lane)
-            val limit = device.lanes.limitMb(lane) * MB
+            val limit = device.lanes.limitMib(lane) * MIB
             val over = limit > 0 && used >= limit
             if (over && !device.lanes.isExhausted(lane)) relay.drop(lane)
             device.lanes.setExhausted(lane, over)
@@ -140,11 +140,11 @@ object RelayHost {
         else "${size(used)} used this session"
 
     fun size(bytes: Long): String = when {
-        bytes >= 1000 * MB -> String.format(Locale.US, "%.2f GB", bytes / (1000.0 * MB))
-        else -> String.format(Locale.US, "%.1f MB", bytes / MB.toDouble())
+        bytes >= 1024 * MIB -> String.format(Locale.US, "%.2f GiB", bytes / (1024.0 * MIB))
+        else -> String.format(Locale.US, "%.1f MiB", bytes / MIB.toDouble())
     }
 
-    /** Decimal, as the rates are, so a figure means the same thing everywhere on the screen. */
-    const val MB = 1_000_000L
+    /** Binary, and labelled as such, matching the desktop so one transfer reads the same on both screens. */
+    const val MIB = 1024L * 1024
     const val SAMPLES = 60
 }

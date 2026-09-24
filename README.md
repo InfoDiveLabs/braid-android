@@ -22,7 +22,7 @@
   <img alt="Android 8.0+" src="https://img.shields.io/badge/Android-8.0%2B-14110E?style=flat-square&logo=android&logoColor=white">
   <img alt="One APK for every architecture" src="https://img.shields.io/badge/one%20APK-every%20architecture-14110E?style=flat-square">
   <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-D07A40?style=flat-square&logo=kotlin&logoColor=white">
-  <img alt="0.5 MB" src="https://img.shields.io/badge/0.5%20MB-D07A40?style=flat-square">
+  <img alt="511 KiB" src="https://img.shields.io/badge/511%20KiB-D07A40?style=flat-square">
   <img alt="Licence" src="https://img.shields.io/badge/PolyForm%20Noncommercial-3FA292?style=flat-square">
 </p>
 

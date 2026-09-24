@@ -162,7 +162,7 @@ class MainActivity : Activity() {
         val lanes = phone.lanes
         return listOf(
             RelayHost.isRunning,
-            lanes.ids.map { listOf(it, lanes.isWanted(it), lanes.isExhausted(it), lanes.isOffered(it), lanes.limitMb(it)) },
+            lanes.ids.map { listOf(it, lanes.isWanted(it), lanes.isExhausted(it), lanes.isOffered(it), lanes.limitMib(it)) },
             phone.pairings.list().map { it.id },
             if (RelayHost.isRunning) addresses() else emptyList(),
         ).toString()
@@ -171,7 +171,7 @@ class MainActivity : Activity() {
     /** The page's structure without the usage figures, so a transfer ticking along does not trigger a transition. */
     private fun shape(): String {
         val lanes = phone.lanes
-        return listOf(RelayHost.isRunning, lanes.ids.map { listOf(lanes.isWanted(it), lanes.isExhausted(it), lanes.isOffered(it), lanes.limitMb(it)) },
+        return listOf(RelayHost.isRunning, lanes.ids.map { listOf(lanes.isWanted(it), lanes.isExhausted(it), lanes.isOffered(it), lanes.limitMib(it)) },
             phone.pairings.list().map { it.id }).toString()
     }
 
@@ -301,7 +301,7 @@ class MainActivity : Activity() {
         val lanes = phone.lanes
         val wanted = lanes.isWanted(lane)
         val used = RelayHost.used(lane)
-        val limit = lanes.limitMb(lane) * RelayHost.MB
+        val limit = lanes.limitMib(lane) * RelayHost.MIB
         val offered = lanes.isOffered(lane)
         val status = when {
             !wanted -> "Not shared"
@@ -397,8 +397,8 @@ class MainActivity : Activity() {
     private fun askLimit(lane: String) {
         val input = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_NUMBER
-            hint = "Megabytes"
-            phone.lanes.limitMb(lane).takeIf { it > 0 }?.let { setText(it.toString()); setSelection(text.length) }
+            hint = "MiB"
+            phone.lanes.limitMib(lane).takeIf { it > 0 }?.let { setText(it.toString()); setSelection(text.length) }
         }
         AlertDialog.Builder(this)
             .setTitle("Mobile data limit")
@@ -407,7 +407,7 @@ class MainActivity : Activity() {
                 setPadding(dp(20), dp(4), dp(20), 0)
                 addView(input)
             })
-            .setPositiveButton("Save") { _, _ -> phone.lanes.setLimitMb(lane, input.text.toString().toLongOrNull() ?: 0) }
+            .setPositiveButton("Save") { _, _ -> phone.lanes.setLimitMib(lane, input.text.toString().toLongOrNull() ?: 0) }
             .setNegativeButton("Cancel", null)
             .show()
     }

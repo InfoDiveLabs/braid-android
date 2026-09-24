@@ -9,10 +9,7 @@ import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
 import java.util.Locale
-import kotlin.math.ceil
-import kotlin.math.log10
 import kotlin.math.max
-import kotlin.math.pow
 
 /**
  * Throughput per lane over the last minute: thin lines over a faint fill, one
@@ -117,15 +114,16 @@ class ThroughputChart(context: Context) : View(context) {
 
     companion object {
         /** 1, 2 or 5 times a power of ten, so the gridline reads as a round number. */
+        /** A power of two in KiB, so the gridline reads as a round binary figure: 256 KiB/s, 1 MiB/s, 4 MiB/s. */
         fun niceCeiling(value: Long): Long {
-            val magnitude = 10.0.pow(ceil(log10(value.toDouble())) - 1)
-            val nice = listOf(1.0, 2.0, 5.0, 10.0).first { it * magnitude >= value }
-            return (nice * magnitude).toLong()
+            var ceiling = 64L * 1024
+            while (ceiling < value) ceiling *= 2
+            return ceiling
         }
 
         fun rate(bytesPerSecond: Long): String = when {
-            bytesPerSecond >= 1_000_000 -> String.format(Locale.US, "%.1f MB/s", bytesPerSecond / 1_000_000.0)
-            else -> String.format(Locale.US, "%d KB/s", bytesPerSecond / 1_000)
+            bytesPerSecond >= 1024 * 1024 -> String.format(Locale.US, "%.1f MiB/s", bytesPerSecond / (1024.0 * 1024))
+            else -> String.format(Locale.US, "%d KiB/s", bytesPerSecond / 1024)
         }
     }
 }

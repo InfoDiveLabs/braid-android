@@ -87,11 +87,11 @@ class NetworkLanes(context: Context, private val table: LaneTable) {
         apply(id)
     }
 
-    /** Megabytes, or 0 for no limit. */
-    fun limitMb(id: String): Long = prefs.getLong("limit_$id", 0)
+    /** Mebibytes, or 0 for no limit. */
+    fun limitMib(id: String): Long = prefs.getLong("limit_$id", 0)
 
-    fun setLimitMb(id: String, mb: Long) {
-        prefs.edit().putLong("limit_$id", mb).apply()
+    fun setLimitMib(id: String, mib: Long) {
+        prefs.edit().putLong("limit_$id", mib).apply()
         onChange?.invoke()
     }
 
