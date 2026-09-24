@@ -9,6 +9,7 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import com.infodive.braid.relay.ControlPlane
 import com.infodive.braid.relay.RelayServer
@@ -16,6 +17,7 @@ import java.net.NetworkInterface
 
 class MainActivity : Activity() {
     private lateinit var paired: LinearLayout
+    private lateinit var lanes: LinearLayout
     private var dialog: AlertDialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -28,6 +30,7 @@ class MainActivity : Activity() {
             "Relay failed to start: $e"
         }
         paired = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        lanes = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(48, 160, 48, 48)
@@ -36,6 +39,12 @@ class MainActivity : Activity() {
                 textSize = 16f
                 setTextIsSelectable(true)
             })
+            addView(TextView(context).apply {
+                text = "Networks to share"
+                textSize = 20f
+                setPadding(0, 64, 0, 16)
+            })
+            addView(lanes)
             addView(TextView(context).apply {
                 text = "Paired desktops"
                 textSize = 20f
@@ -49,12 +58,15 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         showPaired()
+        showLanes()
+        Relay.phone?.lanes?.onChange = { runOnUiThread(::showLanes) }
         PairingPrompt.listener = { request -> runOnUiThread { prompt(request) } }
         PairingPrompt.pending()?.let(::prompt)
     }
 
     override fun onPause() {
         PairingPrompt.listener = null
+        Relay.phone?.lanes?.onChange = null
         dialog?.dismiss()
         dialog = null
         super.onPause()
@@ -81,6 +93,25 @@ class MainActivity : Activity() {
                 dialog?.dismiss()
                 showPaired()
             }
+        }
+    }
+
+    private fun showLanes() {
+        val phone = Relay.phone ?: return
+        lanes.removeAllViews()
+        val offered = phone.lanes().associateBy { it.id }
+        for ((id, name) in listOf(NetworkLanes.CELL to "Mobile data", NetworkLanes.WIFI to "Wi-Fi")) {
+            val lane = offered[id]
+            lanes.addView(Switch(this).apply {
+                text = name + "\n" + when {
+                    !phone.lanes.isEnabled(id) -> "Off"
+                    lane == null -> "Waiting for the network"
+                    else -> listOfNotNull(lane.egress, lane.egress6).joinToString("\n").ifEmpty { "Finding public address" }
+                }
+                isChecked = phone.lanes.isEnabled(id)
+                setOnCheckedChangeListener { _, on -> phone.lanes.setEnabled(id, on) }
+                setPadding(0, 16, 0, 16)
+            })
         }
     }
 
@@ -123,6 +154,7 @@ private object Relay {
     fun ensureStarted(context: Context) {
         if (server == null) {
             val device = AndroidPhone(context)
+            device.lanes.start()
             phone = device
             server = RelayServer(device, control = ControlPlane(device)).also { it.start() }
         }

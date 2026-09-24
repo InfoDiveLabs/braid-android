@@ -4,16 +4,17 @@ import android.content.Context
 import android.os.Build
 import android.provider.Settings
 import com.infodive.braid.relay.Credentials
-import com.infodive.braid.relay.Lane
+import com.infodive.braid.relay.LaneTable
 import com.infodive.braid.relay.Pairings
 import com.infodive.braid.relay.Phone
 import com.infodive.braid.relay.Route
 import com.infodive.braid.relay.Router
-import com.infodive.braid.relay.Upstream
 import java.security.SecureRandom
 
 class AndroidPhone(private val context: Context) : Phone, Router {
     val pairings = Pairings(PreferenceStorage(context, "pairings"))
+    private val table = LaneTable()
+    val lanes = NetworkLanes(context, table)
 
     override val name: String
         get() = Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME)
@@ -27,20 +28,14 @@ class AndroidPhone(private val context: Context) : Phone, Router {
             .also { prefs.edit().putString("device_id", it).commit() }
     }
 
-    /** Honest about what the proxy does until lanes bind to networks: it leaves over whatever network is default. */
-    override fun lanes() = listOf(Lane(id = DEFAULT_LANE, kind = null, label = "Default network"))
+    override fun lanes() = table.offered()
 
     override fun isPaired(key: String) = pairings.isPaired(key)
 
     override fun pair(desktop: String, from: String): String? =
         if (PairingPrompt.ask(desktop, from, PAIR_TIMEOUT_MS)) pairings.add(desktop) else null
 
-    /** A lane this build cannot honestly serve is unavailable, never quietly served over another network. */
-    override fun route(credentials: Credentials?): Route = when {
-        credentials == null || !pairings.isPaired(credentials.key) -> Route.Refused
-        credentials.lane != DEFAULT_LANE -> Route.Unavailable
-        else -> Route.Via(Upstream.DIRECT)
-    }
+    override fun route(credentials: Credentials?): Route = table.route(credentials, pairings::isPaired)
 
     private class PreferenceStorage(context: Context, private val name: String) : Pairings.Storage {
         private val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
@@ -51,8 +46,6 @@ class AndroidPhone(private val context: Context) : Phone, Router {
     }
 
     companion object {
-        const val DEFAULT_LANE = "default"
-
         /** Inside the desktop's 60 seconds, so a refusal by timeout reaches it as an answer rather than a dropped call. */
         private const val PAIR_TIMEOUT_MS = 55_000L
     }
