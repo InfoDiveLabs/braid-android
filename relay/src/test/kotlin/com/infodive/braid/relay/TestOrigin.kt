@@ -9,6 +9,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 
 /**
@@ -72,11 +73,13 @@ class TestOrigin(private val payload: ByteArray) : Closeable {
 class EchoServer : Closeable {
     private val server = ServerSocket(0, 50, InetAddress.getLoopbackAddress())
     val port: Int get() = server.localPort
+    val accepted = AtomicInteger()
 
     init {
         thread(isDaemon = true, name = "echo") {
             while (!server.isClosed) {
                 val socket = try { server.accept() } catch (e: Exception) { break }
+                accepted.incrementAndGet()
                 thread(isDaemon = true) { socket.use { it.getInputStream().transferTo(it.getOutputStream()) } }
             }
         }

@@ -8,6 +8,8 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.concurrent.LinkedBlockingQueue
 
+private const val GOOD_KEY = "f00d"
+
 class ControlPlaneTest {
     private class FakePhone(
         override val name: String = "Pixel",
@@ -16,9 +18,12 @@ class ControlPlaneTest {
     ) : Phone {
         override val deviceId = "9f2c1a"
         val asked = LinkedBlockingQueue<String>()
+        val askedFrom = LinkedBlockingQueue<String>()
         override fun lanes() = lanes
-        override fun pair(desktop: String): String? {
+        override fun isPaired(key: String) = key == GOOD_KEY
+        override fun pair(desktop: String, from: String): String? {
             asked.add(desktop)
+            askedFrom.add(from)
             return answer
         }
     }
@@ -31,12 +36,13 @@ class ControlPlaneTest {
     }
 
     private fun start(phone: Phone): RelayServer =
-        RelayServer(Upstream.DIRECT, InetSocketAddress(InetAddress.getLoopbackAddress(), 0), ControlPlane(phone))
+        RelayServer(Router { Route.Refused }, InetSocketAddress(InetAddress.getLoopbackAddress(), 0), ControlPlane(phone))
             .also { it.start(); relay = it }
 
-    private fun send(server: RelayServer, line: String, body: String = ""): Response {
+    private fun send(server: RelayServer, line: String, body: String = "", key: String? = null): Response {
         val bytes = body.toByteArray(Charsets.UTF_8)
-        val head = "$line\r\nHost: phone\r\nContent-Length: ${bytes.size}\r\n\r\n"
+        val auth = key?.let { "X-Braid-Key: $it\r\n" } ?: ""
+        val head = "$line\r\nHost: phone\r\n${auth}Content-Length: ${bytes.size}\r\n\r\n"
         return exchange(server.port, head.toByteArray(Charsets.ISO_8859_1) + bytes)
     }
 
@@ -64,7 +70,7 @@ class ControlPlaneTest {
             Lane("cell", "cellular", "Mobile data", egress = "203.0.113.7", egress6 = "2001:db8::1", note = "1.4 GB left"),
             Lane("wifi", null, "Home Wi-Fi"),
         )
-        val body = send(start(FakePhone(lanes = lanes)), "GET /braid/status HTTP/1.1").body.toString(Charsets.UTF_8)
+        val body = send(start(FakePhone(lanes = lanes)), "GET /braid/status HTTP/1.1", key = GOOD_KEY).body.toString(Charsets.UTF_8)
         assertEquals(
             "{\"lanes\":[" +
                 "{\"id\":\"cell\",\"kind\":\"cellular\",\"label\":\"Mobile data\",\"egress\":\"203.0.113.7\"," +
@@ -76,7 +82,7 @@ class ControlPlaneTest {
 
     @Test
     fun statusWithNothingOfferedIsAnEmptyList() {
-        assertEquals("{\"lanes\":[]}", send(start(FakePhone()), "GET /braid/status HTTP/1.1").body.toString(Charsets.UTF_8))
+        assertEquals("{\"lanes\":[]}", send(start(FakePhone()), "GET /braid/status HTTP/1.1", key = GOOD_KEY).body.toString(Charsets.UTF_8))
     }
 
     @Test
@@ -86,6 +92,22 @@ class ControlPlaneTest {
         assertEquals(200, response.status)
         assertEquals("k3y", response.json["key"])
         assertEquals("Suraj's \"MacBook\"", phone.asked.poll())
+        assertEquals("127.0.0.1", phone.askedFrom.poll())
+    }
+
+    @Test
+    fun statusWithoutAValidKeyIs401() {
+        val server = start(FakePhone(lanes = listOf(Lane("cell", "cellular", "Mobile data", egress = "203.0.113.7"))))
+        val bare = send(server, "GET /braid/status HTTP/1.1")
+        assertEquals(401, bare.status)
+        assertEquals(0, bare.body.size)
+        assertEquals(401, send(server, "GET /braid/status HTTP/1.1", key = "wrong").status)
+        assertEquals(401, send(server, "GET /braid/status HTTP/1.1", key = "").status)
+    }
+
+    @Test
+    fun helloNeedsNoKeyEvenWhenAWrongOneIsSent() {
+        assertEquals(200, send(start(FakePhone()), "GET /braid/hello HTTP/1.1", key = "wrong").status)
     }
 
     @Test

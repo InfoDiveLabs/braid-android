@@ -22,7 +22,7 @@ class RelayServerTest {
     @Before
     fun setUp() {
         origin = TestOrigin(payload)
-        relay = RelayServer(Upstream.DIRECT, InetSocketAddress(InetAddress.getLoopbackAddress(), 0))
+        relay = RelayServer(Router { Route.Via(Upstream.DIRECT) }, InetSocketAddress(InetAddress.getLoopbackAddress(), 0))
         relay.start()
     }
 

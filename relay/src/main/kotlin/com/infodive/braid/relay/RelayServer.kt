@@ -26,7 +26,7 @@ import java.util.concurrent.TimeUnit
  * CONNECT tunnel, are copied without being looked at.
  */
 class RelayServer(
-    private val upstream: Upstream,
+    private val router: Router,
     private val bindAddress: InetSocketAddress = InetSocketAddress(DEFAULT_PORT),
     private val control: ControlPlane? = null,
 ) : Closeable {
@@ -86,25 +86,37 @@ class RelayServer(
             is Target.Local -> {
                 val plane = control ?: return reply(out, 404, "Not Found")
                 val body = readBody(head, input) ?: return reply(out, 400, "Bad Request")
-                val answer = plane.respond(head, target.path, body)
+                val from = client.inetAddress.hostAddress.substringBefore('%')
+                val answer = plane.respond(head, target.path, body, from)
                 reply(out, answer.code, answer.reason, answer.json)
             }
             Target.Unsupported -> reply(out, 501, "Not Implemented")
             is Target.Tunnel -> {
-                val up = connectOrNull(target.host, target.port) ?: return reply(out, 502, "Bad Gateway")
+                val upstream = routeOrReply(head, out) ?: return
+                val up = connectOrNull(upstream, target.host, target.port) ?: return reply(out, 502, "Bad Gateway")
                 out.write("HTTP/1.1 200 Connection Established\r\n\r\n".toByteArray(Charsets.ISO_8859_1))
                 out.flush()
                 splice(client, input, up)
             }
             is Target.Forward -> {
-                val up = connectOrNull(target.host, target.port) ?: return reply(out, 502, "Bad Gateway")
+                val upstream = routeOrReply(head, out) ?: return
+                val up = connectOrNull(upstream, target.host, target.port) ?: return reply(out, 502, "Bad Gateway")
                 up.getOutputStream().write(originForm(head, target))
                 splice(client, input, up)
             }
         }
     }
 
-    private fun connectOrNull(host: String, port: Int): Socket? = try {
+    private fun routeOrReply(head: RequestHead, out: OutputStream): Upstream? =
+        when (val route = router.route(Credentials.parse(head.header("proxy-authorization")))) {
+            is Route.Via -> route.upstream
+            Route.Refused -> null.also {
+                reply(out, 407, "Proxy Authentication Required", extra = "Proxy-Authenticate: Basic realm=\"braid\"\r\n")
+            }
+            Route.Unavailable -> null.also { reply(out, 503, "Service Unavailable") }
+        }
+
+    private fun connectOrNull(upstream: Upstream, host: String, port: Int): Socket? = try {
         upstream.connect(host, port).also {
             it.tcpNoDelay = true
             open.add(it)
@@ -198,10 +210,10 @@ class RelayServer(
             return input.readNBytes(length).takeIf { it.size == length }
         }
 
-        private fun reply(out: OutputStream, code: Int, reason: String, json: String? = null) {
+        private fun reply(out: OutputStream, code: Int, reason: String, json: String? = null, extra: String = "") {
             val body = json?.toByteArray(Charsets.UTF_8) ?: ByteArray(0)
             val type = if (json != null) "Content-Type: application/json; charset=utf-8\r\n" else ""
-            out.write("HTTP/1.1 $code $reason\r\n${type}Content-Length: ${body.size}\r\nConnection: close\r\n\r\n".toByteArray(Charsets.ISO_8859_1))
+            out.write("HTTP/1.1 $code $reason\r\n$type${extra}Content-Length: ${body.size}\r\nConnection: close\r\n\r\n".toByteArray(Charsets.ISO_8859_1))
             out.write(body)
             out.flush()
         }
