@@ -12,4 +12,5 @@
     <color name="text">#EBEBF0</color>
     <color name="text_muted">#98989D</color>
     <color name="danger">#FF6961</color>
+    <color name="series_wifi">#139E89</color>
 </resources>

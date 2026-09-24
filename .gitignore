@@ -5,3 +5,13 @@ build/
 *.iml
 .DS_Store
 .kotlin/
+
+# Release signing. Never commit these: losing the key means no update can
+# ever be installed over an existing copy, and leaking it lets anyone ship one.
+.env
+keystore/
+*.jks
+*.keystore
+
+# Release output.
+/dist/

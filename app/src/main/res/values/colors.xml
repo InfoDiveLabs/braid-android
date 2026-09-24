@@ -15,4 +15,6 @@
     <color name="text">#1D1D1F</color>
     <color name="text_muted">#6E6E73</color>
     <color name="danger">#D70015</color>
+    <color name="series_cell">#C77A4A</color>
+    <color name="series_wifi">#00897A</color>
 </resources>

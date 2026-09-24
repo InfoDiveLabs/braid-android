@@ -60,6 +60,18 @@ class PairingsTest {
     }
 
     @Test
+    fun aKeyTheDesktopRefusedCanBeWithdrawnWithoutTouchingOthers() {
+        val storage = MemoryStorage()
+        val pairings = Pairings(storage)
+        val kept = pairings.add("Laptop")
+        val refused = pairings.add("Studio")
+        pairings.forgetKey(refused)
+        assertFalse(pairings.isPaired(refused))
+        assertTrue(pairings.isPaired(kept))
+        assertEquals(listOf("Laptop"), Pairings(storage).list().map { it.desktop })
+    }
+
+    @Test
     fun theSameDesktopPairingTwiceHoldsTwoKeys() {
         val pairings = Pairings(MemoryStorage())
         val first = pairings.add("Studio")

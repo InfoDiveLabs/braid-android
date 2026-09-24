@@ -1,8 +1,14 @@
 package com.infodive.braid.companion
 
 import android.Manifest
+import android.animation.ObjectAnimator
+import android.animation.PropertyValuesHolder
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.content.res.Configuration
@@ -11,16 +17,23 @@ import android.graphics.drawable.ClipDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.graphics.drawable.RippleDrawable
+import android.net.ConnectivityManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.system.OsConstants
 import android.text.InputType
+import android.text.TextUtils
 import android.text.format.DateUtils
+import android.transition.Fade
+import android.transition.TransitionManager
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.WindowInsetsController
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -29,19 +42,30 @@ import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
+import android.widget.Toast
+import com.infodive.braid.relay.LocalScope
 import com.infodive.braid.relay.RelayServer
 import java.net.Inet6Address
+import java.net.InetAddress
 import java.net.NetworkInterface
 
 class MainActivity : Activity() {
     private lateinit var column: LinearLayout
+    private val addComputer by lazy { AddComputer(this) { shown = null; render() } }
     private var shown: String? = null
+    private var shape: String? = null
+    private var pulse: ObjectAnimator? = null
+    private var barProgress = 0
+
+    /** Figures that change every second are updated in place, so the page is rebuilt only when its structure changes. */
+    private val live = mutableListOf<() -> Unit>()
     private var dialog: AlertDialog? = null
     private val main = Handler(Looper.getMainLooper())
     private val redraw: () -> Unit = { main.post(::render) }
     private val tick = object : Runnable {
         override fun run() {
             render()
+            live.forEach { it() }
             main.postDelayed(this, 1_000)
         }
     }
@@ -83,6 +107,19 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
         if (RelayService.isServing(this) && !RelayHost.isRunning) RelayService.start(this)
+        openLink(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        openLink(intent)
+    }
+
+    /** A braid://pair link, from the camera app or anywhere else, goes through the same checks as a scan. */
+    private fun openLink(intent: Intent?) {
+        val link = intent?.data?.takeIf { it.scheme == "braid" } ?: return
+        setIntent(Intent(this, MainActivity::class.java))
+        addComputer.handle(link.toString())
     }
 
     override fun onResume() {
@@ -95,6 +132,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        pulse?.cancel()
         RelayHost.unwatch(redraw)
         main.removeCallbacks(tick)
         PairingPrompt.listener = null
@@ -124,20 +162,39 @@ class MainActivity : Activity() {
         val lanes = phone.lanes
         return listOf(
             RelayHost.isRunning,
-            lanes.ids.map { listOf(it, lanes.isWanted(it), lanes.isExhausted(it), lanes.isOffered(it), lanes.limitMb(it), RelayHost.size(RelayHost.used(it))) },
+            lanes.ids.map { listOf(it, lanes.isWanted(it), lanes.isExhausted(it), lanes.isOffered(it), lanes.limitMb(it)) },
             phone.pairings.list().map { it.id },
             if (RelayHost.isRunning) addresses() else emptyList(),
         ).toString()
     }
 
+    /** The page's structure without the usage figures, so a transfer ticking along does not trigger a transition. */
+    private fun shape(): String {
+        val lanes = phone.lanes
+        return listOf(RelayHost.isRunning, lanes.ids.map { listOf(lanes.isWanted(it), lanes.isExhausted(it), lanes.isOffered(it), lanes.limitMb(it)) },
+            phone.pairings.list().map { it.id }).toString()
+    }
+
     private fun render() {
         val now = state()
         if (now == shown) return
+        val structure = shape()
+        if (shown != null && structure != shape) {
+            TransitionManager.beginDelayedTransition(column, Fade().setDuration(180))
+        }
         shown = now
+        shape = structure
+        pulse?.cancel()
+        live.clear()
         column.removeAllViews()
         val serving = RelayHost.isRunning
 
         column.addView(hero(serving))
+
+        if (serving) {
+            column.addView(sectionTitle("Activity"))
+            column.addView(activity())
+        }
 
         column.addView(sectionTitle("Networks"))
         column.addView(group(phone.lanes.ids.map { laneRow(it, serving) }))
@@ -155,7 +212,8 @@ class MainActivity : Activity() {
                 )
             },
         ))
-        if (pairings.isNotEmpty()) column.addView(footnote(PAIRING_STEPS))
+        column.addView(scanButton(), spaced(12))
+        column.addView(footnote(PAIRING_STEPS))
 
         if (serving) {
             val found = addresses()
@@ -164,8 +222,8 @@ class MainActivity : Activity() {
                 column.addView(group(listOf(LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(16), dp(14), dp(16), dp(14))
-                    addView(label("Add it on your computer by typing this address:", 14, muted = true))
-                    found.forEach { addView(label(it, 15).apply { setTextIsSelectable(true); tabular(); setPadding(0, dp(6), 0, 0) }) }
+                    addView(label("On your computer, choose Add phone, then add it by address.", 14, muted = true))
+                    found.forEach { address -> addView(addressField(address), spaced(10)) }
                 })))
             }
         }
@@ -195,6 +253,7 @@ class MainActivity : Activity() {
                     shape = GradientDrawable.OVAL
                     setColor(color(if (serving) R.color.live else R.color.track))
                 }
+                if (serving) pulse = breathe(this)
             }, LinearLayout.LayoutParams(dp(12), dp(12)).apply { marginEnd = dp(12) })
             addView(label(if (serving) "Sharing is on" else "Sharing is off", 32, weight = Typeface.BOLD))
         }, spaced(40))
@@ -204,6 +263,20 @@ class MainActivity : Activity() {
             16, muted = true,
         ).apply { setLineSpacing(0f, 1.2f) }, spaced(10))
         addView(bigButton(serving), spaced(24))
+    }
+
+    /** A slow pulse on the live dot, the one thing on the page that moves by itself, and only while the phone is shared. */
+    private fun breathe(dot: View) = ObjectAnimator.ofPropertyValuesHolder(
+        dot,
+        PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.35f),
+        PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.35f),
+        PropertyValuesHolder.ofFloat(View.ALPHA, 1f, 0.55f),
+    ).apply {
+        duration = 1_100
+        repeatMode = ValueAnimator.REVERSE
+        repeatCount = ValueAnimator.INFINITE
+        interpolator = AccelerateDecelerateInterpolator()
+        start()
     }
 
     private fun bigButton(serving: Boolean) = label(if (serving) "Stop sharing" else "Start sharing", 17, weight = Typeface.BOLD).apply {
@@ -240,13 +313,21 @@ class MainActivity : Activity() {
         val body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(label(if (lane == NetworkLanes.CELL) "Mobile data" else "Wi-Fi", 17, weight = Typeface.BOLD))
-            addView(label(status, 14, muted = !offered, tint = if (offered && serving) color(R.color.live) else null).apply { tabular() }, spaced(2))
+            addView(label(status, 14, muted = !offered, tint = if (offered && serving) color(R.color.live) else null).apply {
+                tabular()
+                if (offered && serving && !lanes.isExhausted(lane)) {
+                    live += { text = "Shared, ${RelayHost.size(RelayHost.used(lane))} used this session" }
+                }
+            }, spaced(2))
             if (lane == NetworkLanes.CELL) {
-                if (limit > 0) addView(usageBar(used, limit), spaced(10))
+                if (limit > 0) addView(usageBar(lane, limit), spaced(10))
                 addView(LinearLayout(context).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                    addView(label(if (limit > 0) "${RelayHost.size(used)} of ${RelayHost.size(limit)}" else "No data limit", 13, muted = true).apply { tabular() },
+                    addView(label(if (limit > 0) "${RelayHost.size(used)} of ${RelayHost.size(limit)}" else "No data limit", 13, muted = true).apply {
+                        tabular()
+                        if (limit > 0) live += { text = "${RelayHost.size(RelayHost.used(lane))} of ${RelayHost.size(limit)}" }
+                    },
                         LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                     addView(textButton(if (limit > 0) "Change limit" else "Set a limit", color(R.color.copper_strong)) { askLimit(lane) })
                 }, spaced(4))
@@ -266,9 +347,16 @@ class MainActivity : Activity() {
         )
     }
 
-    private fun usageBar(used: Long, limit: Long) = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+    private fun usageBar(lane: String, limit: Long) = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
         max = 1000
-        progress = ((used.toDouble() / limit) * 1000).toInt().coerceIn(0, 1000)
+        progress = barProgress
+        fun slide() {
+            val target = ((RelayHost.used(lane).toDouble() / limit) * 1000).toInt().coerceIn(0, 1000)
+            if (target != barProgress) ObjectAnimator.ofInt(this, "progress", barProgress, target).setDuration(450).start()
+            barProgress = target
+        }
+        slide()
+        live += ::slide
         val radius = dp(3).toFloat()
         progressDrawable = LayerDrawable(arrayOf(
             GradientDrawable().apply { cornerRadius = radius; setColor(color(R.color.track)) },
@@ -285,7 +373,25 @@ class MainActivity : Activity() {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(16), dp(16), dp(16), dp(16))
         addView(label("No computers yet", 17, weight = Typeface.BOLD))
-        addView(label(PAIRING_STEPS, 14, muted = true).apply { setLineSpacing(0f, 1.2f) }, spaced(4))
+        addView(label("Add one below to let it download through this phone.", 14, muted = true), spaced(4))
+    }
+
+    private fun scanButton() = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER
+        minimumHeight = dp(52)
+        val shape = GradientDrawable().apply {
+            cornerRadius = dp(26).toFloat()
+            setColor(color(R.color.copper_soft))
+        }
+        background = RippleDrawable(ColorStateList.valueOf(color(R.color.copper_soft)), shape, null)
+        isClickable = true
+        setOnClickListener { addComputer.scan() }
+        addView(ImageView(context).apply {
+            setImageResource(R.drawable.ic_qr)
+            imageTintList = ColorStateList.valueOf(color(R.color.copper_strong))
+        }, LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginEnd = dp(10) })
+        addView(label("Add to a computer by code", 16, weight = Typeface.BOLD, tint = color(R.color.copper_strong)))
     }
 
     private fun askLimit(lane: String) {
@@ -325,12 +431,146 @@ class MainActivity : Activity() {
         request.answer.whenComplete { _, _ -> main.post { dialog?.dismiss(); render() } }
     }
 
+    /** One line per address, cut in the middle if it must be, since the copy button always carries all of it. */
+    private fun addressField(address: String) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(14), dp(4), dp(4), dp(4))
+        background = GradientDrawable().apply {
+            cornerRadius = dp(12).toFloat()
+            setColor(color(R.color.neutral_soft))
+        }
+        addView(label(address, 14).apply {
+            isSingleLine = true
+            ellipsize = TextUtils.TruncateAt.MIDDLE
+            tabular()
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        val icon = ImageView(context).apply {
+            setImageResource(R.drawable.ic_copy)
+            imageTintList = ColorStateList.valueOf(color(R.color.copper_strong))
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            contentDescription = "Copy address"
+            background = RippleDrawable(ColorStateList.valueOf(color(R.color.copper_soft)), null,
+                GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color(R.color.surface)) })
+        }
+        icon.setOnClickListener {
+            copy(address)
+            icon.setImageResource(R.drawable.ic_check)
+            icon.postDelayed({ icon.setImageResource(R.drawable.ic_copy) }, 1_500)
+        }
+        addView(icon, LinearLayout.LayoutParams(dp(44), dp(44)))
+    }
+
+    private fun copy(address: String) {
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Braid phone address", address))
+        // Android 13 and later confirm a copy themselves; a second message would be noise.
+        if (Build.VERSION.SDK_INT < 33) Toast.makeText(this, "Address copied", Toast.LENGTH_SHORT).show()
+    }
+
     /** Global addresses only: a link-local one needs a scope id that means nothing on the computer. */
     private fun addresses(): List<String> = NetworkInterface.getNetworkInterfaces().toList()
-        .filter { it.isUp && !it.isLoopback && !it.name.startsWith("rmnet") && !it.name.startsWith("v4-") && !it.name.startsWith("dummy") }
+        .filter { it.isUp && !it.isLoopback && !LocalScope.isCellular(it.name) && !it.name.startsWith("dummy") }
         .flatMap { it.inetAddresses.toList() }
-        .filter { !it.isLinkLocalAddress && !it.isLoopbackAddress }
+        .filter { !it.isLinkLocalAddress && !it.isLoopbackAddress && it !in temporaryAddresses() }
         .map { if (it is Inet6Address) "[${it.hostAddress!!.substringBefore('%')}]:${RelayServer.DEFAULT_PORT}" else "${it.hostAddress}:${RelayServer.DEFAULT_PORT}" }
+
+    /** IPv6 privacy addresses rotate within a day; an address typed into the desktop should outlast that. */
+    private fun temporaryAddresses(): Set<InetAddress> {
+        val cm = getSystemService(ConnectivityManager::class.java)
+        @Suppress("DEPRECATION")
+        return cm.allNetworks.mapNotNull { cm.getLinkProperties(it) }
+            .flatMap { it.linkAddresses }
+            .filter { (it.flags and OsConstants.IFA_F_TEMPORARY) != 0 }
+            .map { it.address }
+            .toSet()
+    }
+
+    /**
+     * The last minute of traffic per network, labelled directly, then the
+     * session's headline figures. Touching the chart reads out that second.
+     */
+    private fun activity(): View {
+        val lanes = phone.lanes.ids
+        val seriesColor = mapOf(NetworkLanes.CELL to color(R.color.series_cell), NetworkLanes.WIFI to color(R.color.series_wifi))
+        val caption = label("Last minute", 13, muted = true)
+        val rates = lanes.associateWith { label("", 15, weight = Typeface.BOLD).apply { tabular() } }
+        val chart = ThroughputChart(this)
+        var scrubbed: Int? = null
+
+        fun refresh() {
+            val history = lanes.associateWith { RelayHost.history(it) }
+            chart.series = lanes.map { ThroughputChart.Series(seriesColor.getValue(it), history.getValue(it)) }
+            val at = scrubbed
+            caption.text = if (at == null) "Last minute" else if (at == 0) "Now" else "$at s ago"
+            for (lane in lanes) {
+                val values = history.getValue(lane)
+                rates.getValue(lane).text = ThroughputChart.rate(values[values.size - 1 - (at ?: 0)])
+            }
+        }
+        chart.onScrub = { scrubbed = it; refresh() }
+
+        val legend = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            for (lane in lanes) {
+                addView(LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(View(context).apply {
+                            background = GradientDrawable().apply { cornerRadius = dp(2).toFloat(); setColor(seriesColor.getValue(lane)) }
+                        }, LinearLayout.LayoutParams(dp(12), dp(4)).apply { marginEnd = dp(8) })
+                        addView(label(phone.lanes.label(lane), 13, muted = true))
+                    })
+                    addView(rates.getValue(lane), spaced(2))
+                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            }
+        }
+
+        val used = stat("Used this session")
+        val peak = stat("Fastest")
+        val time = stat("Sharing for")
+        val open = stat("Connections now")
+        live += {
+            if (scrubbed == null) refresh()
+            used.second.text = RelayHost.size(lanes.sumOf { RelayHost.used(it) })
+            peak.second.text = ThroughputChart.rate(RelayHost.peak)
+            time.second.text = DateUtils.formatElapsedTime((SystemClock.elapsedRealtime() - RelayHost.sessionStart) / 1000)
+            open.second.text = RelayHost.connections.toString()
+        }
+        live.last()()
+
+        return group(listOf(
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(16), dp(14), dp(16), dp(16))
+                addView(caption)
+                addView(legend, spaced(8))
+                addView(chart, spaced(12))
+            },
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(16), dp(14), dp(16), dp(14))
+                addView(tiles(used.first, peak.first), LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+                addView(tiles(time.first, open.first), spaced(14))
+            },
+        ), inset = 0)
+    }
+
+    private fun stat(name: String): Pair<View, TextView> {
+        val value = label("", 20, weight = Typeface.BOLD).apply { tabular() }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(label(name, 13, muted = true))
+            addView(value, spaced(2))
+        } to value
+    }
+
+    private fun tiles(a: View, b: View) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        addView(a, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        addView(b, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+    }
 
     private fun sectionTitle(value: String) = label(value, 15, weight = Typeface.BOLD, muted = true).apply {
         setPadding(dp(4), dp(32), 0, dp(10))
@@ -342,7 +582,7 @@ class MainActivity : Activity() {
     }
 
     /** Rows share one panel with hairlines between them, as the desktop's settings do. */
-    private fun group(rows: List<View>) = LinearLayout(this).apply {
+    private fun group(rows: List<View>, inset: Int = 68) = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         background = GradientDrawable().apply {
             cornerRadius = dp(20).toFloat()
@@ -351,7 +591,7 @@ class MainActivity : Activity() {
         clipToOutline = true
         rows.forEachIndexed { i, row ->
             if (i > 0) addView(View(context).apply { setBackgroundColor(color(R.color.divider)) },
-                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply { marginStart = dp(68) })
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)).apply { marginStart = dp(inset) })
             addView(row)
         }
     }
@@ -407,7 +647,7 @@ class MainActivity : Activity() {
         .apply { topMargin = dp(top) }
 
     private companion object {
-        const val PAIRING_STEPS = "To pair a computer, open Braid on it, click Add phone at the bottom of the interfaces list, " +
-            "then Scan and Pair. This phone will ask you to allow it."
+        const val PAIRING_STEPS = "On your computer, click Add phone at the bottom of Braid\u2019s interfaces list. " +
+            "Scan the code it shows, or press Scan there and allow the request on this phone."
     }
 }

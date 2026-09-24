@@ -32,8 +32,15 @@ class RelayService : Service() {
     override fun onCreate() {
         super.onCreate()
         notifications = getSystemService(NotificationManager::class.java)
+        // Low importance hides the status bar icon on Pixel, and a phone lending its data should say so
+        // where it can be seen; default importance with no sound shows it without interrupting anyone.
+        notifications.deleteNotificationChannel("sharing")
         notifications.createNotificationChannel(
-            NotificationChannel(CHANNEL_SHARING, "Sharing", NotificationManager.IMPORTANCE_LOW),
+            NotificationChannel(CHANNEL_SHARING, "Sharing", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                setSound(null, null)
+                enableVibration(false)
+                setShowBadge(false)
+            },
         )
         notifications.createNotificationChannel(
             NotificationChannel(CHANNEL_PAIRING, "Pairing requests", NotificationManager.IMPORTANCE_HIGH),
@@ -128,7 +135,7 @@ class RelayService : Service() {
 
     companion object {
         private const val ACTION_STOP = "com.infodive.braid.companion.STOP"
-        private const val CHANNEL_SHARING = "sharing"
+        private const val CHANNEL_SHARING = "sharing_status"
         private const val CHANNEL_PAIRING = "pairing"
         private const val ID_SHARING = 1
         private const val ID_PAIRING = 2

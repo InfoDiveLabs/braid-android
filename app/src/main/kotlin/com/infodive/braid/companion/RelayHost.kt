@@ -25,6 +25,25 @@ object RelayHost {
     @Volatile
     var onActiveChanged: ((Int) -> Unit)? = null
 
+    private val history = HashMap<String, LongArray>()
+    private val counted = HashMap<String, Long>()
+
+    @Volatile
+    var sessionStart = 0L
+        private set
+
+    @Volatile
+    var peak = 0L
+        private set
+
+    @Volatile
+    var connections = 0
+        private set
+
+    /** Bytes per second for each of the last [SAMPLES] seconds, oldest first. */
+    @Synchronized
+    fun history(lane: String): LongArray = history[lane]?.copyOf() ?: LongArray(SAMPLES)
+
     @Synchronized
     fun phone(context: Context): AndroidPhone =
         phone ?: AndroidPhone(context.applicationContext).also { created ->
@@ -40,8 +59,16 @@ object RelayHost {
     fun start(context: Context) {
         if (server != null) return
         val device = phone(context)
+        history.clear()
+        counted.clear()
+        peak = 0
+        connections = 0
+        sessionStart = android.os.SystemClock.elapsedRealtime()
         server = RelayServer(device, control = ControlPlane(device)).also {
-            it.onActiveChanged = { count -> onActiveChanged?.invoke(count) }
+            it.onActiveChanged = { count ->
+                connections = count
+                onActiveChanged?.invoke(count)
+            }
             it.start()
         }
         device.lanes.start()
@@ -84,6 +111,19 @@ object RelayHost {
     private fun tick() {
         val device = phone ?: return
         val relay = server ?: return
+        var total = 0L
+        synchronized(this) {
+            for (lane in device.lanes.ids) {
+                val used = relay.traffic.bytes(lane)
+                val rate = (used - (counted[lane] ?: used)).coerceAtLeast(0)
+                counted[lane] = used
+                val samples = history.getOrPut(lane) { LongArray(SAMPLES) }
+                System.arraycopy(samples, 1, samples, 0, SAMPLES - 1)
+                samples[SAMPLES - 1] = rate
+                total += rate
+            }
+        }
+        peak = maxOf(peak, total)
         for (lane in device.lanes.ids) {
             val used = relay.traffic.bytes(lane)
             val limit = device.lanes.limitMb(lane) * MB
@@ -100,9 +140,11 @@ object RelayHost {
         else "${size(used)} used this session"
 
     fun size(bytes: Long): String = when {
-        bytes >= 1000 * MB -> String.format(Locale.US, "%.2f GB", bytes / (1024.0 * MB))
+        bytes >= 1000 * MB -> String.format(Locale.US, "%.2f GB", bytes / (1000.0 * MB))
         else -> String.format(Locale.US, "%.1f MB", bytes / MB.toDouble())
     }
 
-    const val MB = 1024L * 1024
+    /** Decimal, as the rates are, so a figure means the same thing everywhere on the screen. */
+    const val MB = 1_000_000L
+    const val SAMPLES = 60
 }

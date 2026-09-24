@@ -40,6 +40,13 @@ class Pairings(private val storage: Storage) {
         persist()
     }
 
+    /** Withdraws a key that was issued but never accepted, such as one a desktop refused during registration. */
+    @Synchronized
+    fun forgetKey(key: String) {
+        val hash = sha256(key)
+        if (pairings.removeAll { it.hash == hash }) persist()
+    }
+
     fun isPaired(key: String): Boolean {
         val candidate = sha256(key).toByteArray()
         return list().fold(false) { found, p -> MessageDigest.isEqual(candidate, p.hash.toByteArray()) or found }
