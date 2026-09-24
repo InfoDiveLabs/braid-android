@@ -91,7 +91,8 @@ class RelayService : Service() {
             this, 0, Intent(this, RelayService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE,
         )
         return Notification.Builder(this, CHANNEL_SHARING)
-            .setSmallIcon(android.R.drawable.stat_sys_upload)
+            .setSmallIcon(R.drawable.ic_stat_braid)
+            .setColor(getColor(R.color.copper))
             .setContentTitle(
                 if (phone.lanes.isWanted(NetworkLanes.CELL)) "Sharing this phone's mobile data" else "Braid sharing is on",
             )
@@ -108,7 +109,8 @@ class RelayService : Service() {
         notifications.notify(
             ID_PAIRING,
             Notification.Builder(this, CHANNEL_PAIRING)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setSmallIcon(R.drawable.ic_stat_braid)
+                .setColor(getColor(R.color.copper))
                 .setContentTitle("Pair with “$name”?")
                 .setContentText("A computer at ${request.from} wants to use this phone. Tap to review.")
                 .setContentIntent(openApp())

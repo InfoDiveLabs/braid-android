@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="copper_strong">#D2895A</color>
+    <color name="copper_soft">#33C77A4A</color>
+    <color name="live">#3FA292</color>
+    <color name="live_soft">#333FA292</color>
+    <color name="background">#1E1E20</color>
+    <color name="surface">#2C2C2E</color>
+    <color name="neutral_soft">#3A3A3C</color>
+    <color name="divider">#3A3A3C</color>
+    <color name="track">#48484A</color>
+    <color name="text">#EBEBF0</color>
+    <color name="text_muted">#98989D</color>
+    <color name="danger">#FF6961</color>
+</resources>

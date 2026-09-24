@@ -11,8 +11,10 @@
 
     <application
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
         android:label="Braid"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:roundIcon="@mipmap/ic_launcher"
+        android:theme="@style/Theme.Braid">
         <activity
             android:name=".MainActivity"
             android:exported="true"

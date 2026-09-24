@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The desktop's tokens (dl-gui/ui/theme.slint), so the two apps read as one product. -->
+<resources>
+    <color name="icon_tile">#14110E</color>
+    <color name="copper">#C77A4A</color>
+    <color name="copper_strong">#B86F3F</color>
+    <color name="copper_soft">#1FC77A4A</color>
+    <color name="live">#2E8578</color>
+    <color name="live_soft">#1F2E8578</color>
+    <color name="background">#F2F2F4</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="neutral_soft">#EDEDF0</color>
+    <color name="divider">#E3E3E7</color>
+    <color name="track">#D8D8DC</color>
+    <color name="text">#1D1D1F</color>
+    <color name="text_muted">#6E6E73</color>
+    <color name="danger">#D70015</color>
+</resources>
